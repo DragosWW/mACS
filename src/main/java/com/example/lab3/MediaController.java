@@ -21,13 +21,16 @@ import java.util.UUID;
 @RequestMapping("/api/media")
 public class MediaController {
 
-    private static final Set<String> ALLOWED_EXT =
-            Set.of("jpg", "jpeg", "png", "gif", "webp", "mp4", "mov", "webm");
+    private static final Set<String> IMAGE_EXT = Set.of("jpg", "jpeg", "png", "gif");
+    private static final Set<String> VIDEO_EXT = Set.of("mp4", "mov", "webm");
 
     private final Path baseDir;
+    private final ImageProcessingService imageService;
 
-    public MediaController(@Value("${media.base-path:media}") String basePath) throws IOException {
+    public MediaController(@Value("${media.base-path:media}") String basePath,
+                           ImageProcessingService imageService) throws IOException {
         this.baseDir = Path.of(basePath).toAbsolutePath().normalize();
+        this.imageService = imageService;
         Files.createDirectories(baseDir);
     }
 
@@ -41,7 +44,10 @@ public class MediaController {
 
         String ext = StringUtils.getFilenameExtension(file.getOriginalFilename());
         ext = (ext == null) ? "" : ext.toLowerCase(Locale.ROOT);
-        if (!ALLOWED_EXT.contains(ext)) {
+
+        boolean isImage = IMAGE_EXT.contains(ext);
+        boolean isVideo = VIDEO_EXT.contains(ext);
+        if (!isImage && !isVideo) {
             return error("Extension not allowed: ." + ext);
         }
 
@@ -52,8 +58,18 @@ public class MediaController {
 
         String filename = UUID.randomUUID() + "." + ext;
         Path target = baseDir.resolve(filename);
-        try (InputStream in = file.getInputStream()) {
-            Files.copy(in, target);
+
+        if (isImage) {
+            try {
+                byte[] processed = imageService.process(file.getBytes(), ext);
+                Files.write(target, processed);
+            } catch (IllegalArgumentException e) {
+                return error(e.getMessage());
+            }
+        } else {
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, target);
+            }
         }
 
         return ResponseEntity.status(HttpStatus.CREATED)
